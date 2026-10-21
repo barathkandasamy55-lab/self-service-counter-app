@@ -1,0 +1,79 @@
+// All money is whole paise in Int columns. Never floating-point rupees.
+
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum OrderStatus {
+  pending
+  paid
+  expired
+  needs_review
+  picked_up
+
+  @@map("order_status")
+}
+
+model Product {
+  id         Int    @id @default(autoincrement())
+  name       String @unique
+  pricePaise Int    @map("price_paise")
+  /// Physical units in the counter. Only a pickup reduces it.
+  stock      Int
+  /// Units not held by a pending or paid order. CHECK (0 <= available <= stock) in the migration.
+  available  Int
+
+  items OrderItem[]
+
+  @@map("products")
+}
+
+model Order {
+  id           String      @id @default(uuid()) @db.Uuid
+  status       OrderStatus @default(pending)
+  totalPaise   Int         @map("total_paise")
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(3)
+  expiresAt    DateTime    @map("expires_at") @db.Timestamptz(3)
+  paidAt       DateTime?   @map("paid_at") @db.Timestamptz(3)
+  pickedUpAt   DateTime?   @map("picked_up_at") @db.Timestamptz(3)
+  reviewReason String?     @map("review_reason")
+
+  items OrderItem[]
+
+  @@index([status, expiresAt])
+  @@map("orders")
+}
+
+model OrderItem {
+  orderId        String @map("order_id") @db.Uuid
+  productId      Int    @map("product_id")
+  quantity       Int
+  unitPricePaise Int    @map("unit_price_paise")
+
+  order   Order   @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@id([orderId, productId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+/// One row per provider event. The primary key on event_id makes the webhook idempotent.
+model PaymentEvent {
+  eventId     String   @id @map("event_id")
+  orderId     String   @map("order_id")
+  amountPaise Int      @map("amount_paise")
+  status      String
+  outcome     String?
+  payload     Json
+  receivedAt  DateTime @default(now()) @map("received_at") @db.Timestamptz(3)
+
+  @@index([orderId])
+  @@map("payment_events")
+}
