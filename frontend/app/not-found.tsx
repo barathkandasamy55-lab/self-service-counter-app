@@ -2,9 +2,9 @@ import Link from 'next/link';
 
 export default function NotFound() {
   return (
-    <main>
-      <h1>Page not found</h1>
-      <Link href="/">Back to the counter</Link>
-    </main>
+    <section>
+      <h2>Page not found</h2>
+      <Link href="/catalog">Back to the counter</Link>
+    </section>
   );
 }

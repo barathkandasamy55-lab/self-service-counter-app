@@ -1,12 +1,5 @@
-import { KioskView } from './_components/kiosk-view';
+import { redirect } from 'next/navigation';
 
 export default function HomePage() {
-  return (
-    <main>
-      <header>
-        <h1>Pickup Counter</h1>
-      </header>
-      <KioskView />
-    </main>
-  );
+  redirect('/catalog');
 }

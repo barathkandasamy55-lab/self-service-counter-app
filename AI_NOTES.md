@@ -6,9 +6,17 @@
 
 ## A prompt that worked well
 
-> "try to use prisma for transactions as well, go for raw query if prisma was a tough ask"
+> "Use Prisma for the transactions as well. Fall back to raw SQL only where Prisma genuinely can't do it."
 
-Before this, the plan used Prisma only for the schema and kept the hard paths in raw SQL with `SELECT ... FOR UPDATE`. This prompt made it rethink instead of wrapping raw SQL in Prisma. The result: hold stock in an `available` counter that only ever changes through a conditional `updateMany` (`available >= qty`), and make every order state change conditional on the current status. That needs no row locks at all, and it's simpler to reason about than the lock-ordering version. Raw SQL dropped to one line (reading the database clock).
+The first design used Prisma for the schema only and kept the concurrency-critical paths in raw SQL with `SELECT … FOR UPDATE` and careful lock ordering. This prompt set a constraint without prescribing a solution, which forced a rethink rather than a wrapper. The result was simpler and safer: stock lives in an `available` counter that changes only through a conditional `updateMany` (`available >= qty`), and every order state change is conditional on the current status. Postgres re-checks the `WHERE` after a row lock, so no explicit locks or lock ordering are needed. Raw SQL shrank to one parameter-free tagged-template query that reads the database clock.
+
+What I took from it: giving the AI a constraint plus an escape hatch works better than dictating the implementation.
+
+## What I'd ask for up front next time
+
+> "Before writing code, list the race conditions in this design and, for each, the test that would catch it. Then break the code on purpose to prove each test fails."
+
+I ended up doing this after the fact (deliberately removing the stock guard and the pickup condition to confirm the tests went red). Asking for it first would have shaped the design around provable guarantees from the start.
 
 ## Things the AI got wrong, and how they were noticed
 

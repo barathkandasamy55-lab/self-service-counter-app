@@ -4,7 +4,7 @@ import { Order } from '@/lib/types';
 import { formatPaise } from '@/lib/utils/money';
 import { formatSeconds } from '@/lib/utils/time';
 
-export function PendingPayment({
+export default function PendingPayment({
   order,
   secondsLeft,
   connectionProblem,

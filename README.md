@@ -8,17 +8,47 @@ A self-service snack counter: the customer picks items on a screen, pays by UPI,
 
 ## Run it
 
+**You need:** Docker Desktop, running. Nothing else: Node and Postgres run inside the containers.
+
+Run every command below in a terminal (PowerShell, bash, or the VS Code terminal) opened at the **repo root**, the folder that contains `docker-compose.yml`:
+
 ```bash
-docker compose up --build
+cd self-service-counter-app
+docker compose up --build -d
 ```
+
+The first build takes a few minutes. Then open:
 
 | What | URL |
 | --- | --- |
 | Customer screen | http://localhost:8080 |
-| API | http://localhost:3000 |
+| API | http://localhost:3000 (e.g. http://localhost:3000/products) |
 | Postgres (from the host) | `localhost:55432`, user/password `counter` |
 
 On start, the backend applies migrations (`prisma migrate deploy`) and seeds five products, but only into an empty table. Chocolate Bar starts with only 2 units, so you can watch it sell out.
+
+If `http://localhost:3000` doesn't respond but the screen works, use `http://127.0.0.1:3000`. On some machines `localhost` resolves to IPv6 first and another program holds that port. The customer screen isn't affected, because it reaches the API through its own `/api` proxy.
+
+### Managing the containers
+
+| What | Command |
+| --- | --- |
+| Start (first time, or after changing code) | `docker compose up --build -d` |
+| Start again, no code changes | `docker compose up -d` |
+| See what is running | `docker compose ps` |
+| Follow the backend logs (Ctrl+C to stop following) | `docker compose logs -f backend` |
+| Stop everything | `docker compose down` |
+| Stop and wipe the database (fresh seed on next start) | `docker compose down -v` |
+
+### Try the whole flow
+
+1. Open http://localhost:8080, add snacks with **+**, and click **Place order**. The payment screen shows a countdown and the order id.
+2. Simulate the UPI payment from the repo root (the payment screen shows this command with your order id filled in):
+   ```bash
+   docker compose exec backend npm run send-webhook -- <orderId>
+   ```
+3. Within about 2 seconds the screen shows **Payment received**. Click **Simulate locker pickup** to collect it.
+4. To see an expiry, place an order, don't pay, and wait 2 minutes: the screen says the time ran out and the units go back on sale.
 
 ### Pay for an order (simulated provider)
 
@@ -38,11 +68,13 @@ After payment, the screen has a **Simulate locker pickup** button that calls `PO
 
 ## Run the tests
 
+From the repo root, with Docker running:
+
 ```bash
 docker compose run --rm test
 ```
 
-This runs Jest against a real PostgreSQL database (`counter_test` on the compose `db` service). The test setup creates that database if needed and applies the Prisma migrations to it. No mocks: each test boots the real Nest app on a random port and talks to it over HTTP.
+It should finish with `Tests: 25 passed`. This runs Jest against a real PostgreSQL database (`counter_test` on the compose `db` service). The test setup creates that database if needed and applies the Prisma migrations to it. No mocks: each test boots the real Nest app on a random port and talks to it over HTTP.
 
 To run on the host instead: `docker compose up -d db`, then `cd backend && npm install && npm test`. The default `TEST_DATABASE_URL` points at `localhost:55432/counter_test`. The tests refuse any database whose name doesn't end in `_test`, because they wipe it.
 
@@ -176,7 +208,9 @@ backend/
   test/                     e2e tests against real Postgres + harness
   scripts/send-webhook.ts   signed webhook sender
 frontend/
-  app/                      page, layout, _components/ for the kiosk screens
+  app/
+    catalog/                /catalog: product list and cart (_components/, layout, page)
+    orders/[id]/            /orders/:id: payment countdown, result, locker pickup (_components/, layout, page)
   components/               shared UI pieces
   lib/api/                  axios client + ApiError
   lib/services/             products and orders API calls

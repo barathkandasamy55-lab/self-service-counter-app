@@ -2,7 +2,7 @@ import { Order } from '@/lib/types';
 import { formatPaise } from '@/lib/utils/money';
 import { orderCode } from '@/lib/utils/order';
 
-export function OrderSummary({ order }: { order: Order }) {
+export default function OrderSummary({ order }: { order: Order }) {
   return (
     <div className="summary">
       <h2>Order {orderCode(order.id)}</h2>

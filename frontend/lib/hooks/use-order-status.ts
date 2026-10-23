@@ -1,48 +1,54 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { ApiError } from '@/lib/api';
 import { FINAL_ORDER_STATUSES, ORDER_POLL_INTERVAL_MS } from '@/lib/constants';
 import { ordersService } from '@/lib/services';
-import { Order, Timed } from '@/lib/types';
+import { Order } from '@/lib/types';
 import { useServerCountdown } from './use-server-countdown';
 
+export type OrderLoadError = 'not_found' | 'connection';
+
 /**
- * Polls an order until it is paid, expired, in review or collected, and keeps the hold
- * countdown synced with the server on every response.
+ * Loads an order and polls it until it is paid, expired, in review or collected, syncing the
+ * hold countdown with the server on every response.
  */
-export function useOrderStatus(placed: Timed<Order>) {
-  const [order, setOrder] = useState(placed.data);
-  const [connectionProblem, setConnectionProblem] = useState(false);
+export function useOrderStatus(orderId: string) {
+  const [order, setOrder] = useState<Order | null>(null);
+  const [error, setError] = useState<OrderLoadError | null>(null);
   const [attempt, setAttempt] = useState(0);
   const { secondsLeft, sync } = useServerCountdown();
 
-  useEffect(() => {
-    if (placed.data.expiresInSeconds !== null) sync(placed.data.expiresInSeconds, placed.sentAt);
-  }, [placed, sync]);
+  const load = useCallback(async () => {
+    const { data, sentAt } = await ordersService.get(orderId);
+    if (data.expiresInSeconds !== null) sync(data.expiresInSeconds, sentAt);
+    setOrder(data);
+  }, [orderId, sync]);
 
-  const isFinal = FINAL_ORDER_STATUSES.includes(order.status);
+  const isFinal = order !== null && FINAL_ORDER_STATUSES.includes(order.status);
+  const stopped = isFinal || error === 'not_found';
 
   useEffect(() => {
-    if (isFinal) return;
+    if (stopped) return;
     let cancelled = false;
-    const timer = setTimeout(async () => {
-      try {
-        const { data, sentAt } = await ordersService.get(order.id);
-        if (cancelled) return;
-        if (data.expiresInSeconds !== null) sync(data.expiresInSeconds, sentAt);
-        setConnectionProblem(false);
-        setOrder(data);
-      } catch {
-        if (!cancelled) setConnectionProblem(true);
-      }
-      // Schedule the next poll whatever happened.
-      if (!cancelled) setAttempt((n) => n + 1);
-    }, ORDER_POLL_INTERVAL_MS);
+    // First load straight away, then poll.
+    const timer = setTimeout(
+      async () => {
+        try {
+          await load();
+          if (!cancelled) setError(null);
+        } catch (err) {
+          if (!cancelled) setError(err instanceof ApiError && err.status === 404 ? 'not_found' : 'connection');
+        }
+        if (!cancelled) setAttempt((n) => n + 1);
+      },
+      attempt === 0 ? 0 : ORDER_POLL_INTERVAL_MS,
+    );
     return () => {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [order.id, isFinal, attempt, sync]);
+  }, [load, stopped, attempt]);
 
-  return { order, setOrder, isFinal, secondsLeft, connectionProblem };
+  return { order, setOrder, reload: load, isFinal, secondsLeft, error };
 }

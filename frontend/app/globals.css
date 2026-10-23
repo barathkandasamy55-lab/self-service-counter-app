@@ -128,6 +128,21 @@ code {
   word-break: break-all;
 }
 
-.payment > button {
-  margin-top: 12px;
+.actions {
+  display: flex;
+  gap: 12px;
+  margin: 12px 0;
+}
+
+/* Links that look like buttons, e.g. "Start a new order". */
+a.button {
+  display: inline-block;
+  text-decoration: none;
+  border-radius: 6px;
+}
+
+a.button.primary {
+  background: var(--accent);
+  color: white;
+  padding: 10px 20px;
 }
