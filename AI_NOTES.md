@@ -6,23 +6,61 @@
 
 ## A prompt that worked well
 
-> "Use Prisma for the transactions as well. Fall back to raw SQL only where Prisma genuinely can't do it."
+I'm building a pickup counter application using Next.js, TypeScript, Nest.js, and PostgreSQL. Customers can place orders, which reserve product stock for 120 seconds until payment is confirmed.
 
-The first design used Prisma for the schema only and kept the concurrency-critical paths in raw SQL with `SELECT … FOR UPDATE` and careful lock ordering. This prompt set a constraint without prescribing a solution, which forced a rethink rather than a wrapper. The result was simpler and safer: stock lives in an `available` counter that changes only through a conditional `updateMany` (`available >= qty`), and every order state change is conditional on the current status. Postgres re-checks the `WHERE` after a row lock, so no explicit locks or lock ordering are needed. Raw SQL shrank to one parameter-free tagged-template query that reads the database clock.
+Help me design the order creation logic so that concurrent requests cannot reserve more units than are available. Use real PostgreSQL transactions and explain how row-level locking or another appropriate concurrency-control mechanism can prevent overselling.
 
-What I took from it: giving the AI a constraint plus an escape hatch works better than dictating the implementation.
+The implementation must:
 
-## What I'd ask for up front next time
+Validate the requested product quantities and available stock.
 
-> "Before writing code, list the race conditions in this design and, for each, the test that would catch it. Then break the code on purpose to prove each test fails."
+Reserve stock atomically for the entire order.
 
-I ended up doing this after the fact (deliberately removing the stock guard and the pickup condition to confirm the tests went red). Asking for it first would have shaped the design around provable guarantees from the start.
+Roll back the transaction if any requested product has insufficient stock, without leaving partial reservations.
 
-## Things the AI got wrong, and how they were noticed
+Calculate the order total using integer paise, not floating-point rupees.
 
-- **A made-up test reference.** The first version of the signature unit test had a comment saying its expected value came from an `openssl` command. No such command was ever run, and the assertion only checked the output was 64 hex characters. It was caught in review and replaced with the published RFC 4231 test vector, which checks the HMAC against a known answer.
-- **Hold length off by a few milliseconds.** `createdAt` used the column default, which Postgres sets at transaction start, while `expiresAt` was computed from a later database-clock reading. The live smoke test showed `createdAt` 5 ms after `expiresAt − 120 s`. The fix sets both from the same reading.
-- **Webhook validation too strict.** The global validation pipe was first set to reject unknown fields. A provider adding a field to its payload would then get 400s and retry forever. It was changed to strip unknown fields instead.
-- **Tooling slips:** a PowerShell write added a byte-order mark to `package.json`, which broke Jest's JSON parser (caught by the next test run). The first browser-check script replaced `Date` with a subclass that hung page load; the app was fine, the probe was wrong. It was diagnosed by loading the page with and without the override.
+Handle expired reservations correctly so that stock becomes available again.
 
-To be sure the concurrency tests prove something, I had Claude Code break the stock guard and the pickup condition on purpose. Both broken versions failed their tests, and the originals passed again.
+Include integration tests against a real PostgreSQL database, including a scenario where ten concurrent customers attempt to purchase the last two units.
+
+Explain the reasoning behind the implementation, identify potential race conditions, and suggest tests that would expose them. Avoid relying on mocked database calls to prove concurrency correctness.
+
+## Things the AI got wrong, and how they were noticed (Improvements from my code review)
+
+### Destructuring the cart hook
+
+Reviewing the catalog screen (`frontend/app/catalog/_components/mainsection.tsx`), I noticed the AI kept the whole cart hook result in one object and reached into it everywhere:
+
+```tsx
+const cart = useCart(products);
+// ...
+placeOrder(cart.orderLines);
+cart.trimTo(result.shortages);
+quantityOf={cart.quantityOf}
+cart.change(product, delta);
+totalPaise={cart.totalPaise}
+disabled={cart.lines.length === 0 || placing}
+```
+
+The other hooks in the same file were already destructured (`const { products, loadError, refresh } = useProducts()`), so this was inconsistent and noisier to read. I asked for it to be destructured, and the AI changed it to:
+
+```tsx
+const { lines, orderLines, totalPaise, quantityOf, change: changeQuantity, trimTo } = useCart(products);
+```
+
+It also renamed `change` to `changeQuantity`, so the call reads clearly in the JSX. Behaviour is unchanged, and the type check passed.
+
+### A flash of old content during navigation
+
+Clicking **Start a new order** on the payment screen showed a brief glitch: the old screen stayed up, then the catalog appeared with an empty table and "Total: ₹0.00" before the products filled in. It was hard to see on a fast connection, so I confirmed it in the browser's Network tab by switching from "No throttling" to a slow network profile. There the flash was obvious.
+
+The cause was two gaps: no loading screen while Next.js switched routes, and the catalog rendering before its first `GET /products` response. I asked the AI to add a loading state. It added:
+
+- a shared `LoadingState` component (a spinner and a message, with fixed height so the layout doesn't jump)
+- Next.js route-level `loading.tsx` files for `/catalog` and `/orders/[id]`, shown while switching pages
+- a `loading` flag in the `useProducts` hook, so the catalog shows the loader until the first product list arrives, instead of an empty table
+
+
+
+

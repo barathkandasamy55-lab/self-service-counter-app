@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { LoadingState } from '@/components/loading-state';
 import { StatusMessage } from '@/components/status-message';
 import { useOrderStatus } from '@/lib/hooks';
 import OrderOutcome from './order-outcome';
@@ -20,7 +21,7 @@ export default function MainSection({ orderId }: { orderId: string }) {
     );
   }
   if (!order) {
-    return <p className="waiting">{error ? 'Connection problem, retrying…' : 'Loading your order…'}</p>;
+    return <LoadingState message={error ? 'Connection problem, retrying…' : 'Loading your order…'} />;
   }
 
   return (
@@ -33,7 +34,7 @@ export default function MainSection({ orderId }: { orderId: string }) {
       {order.status === 'paid' && <PaidPanel order={order} onCollected={setOrder} onRefused={reload} />}
       <OrderOutcome order={order} />
 
-      {isFinal && (
+      {(isFinal || order.status === 'paid') && (
         <div className="actions">
           <Link className="button primary" href="/catalog">
             Start a new order

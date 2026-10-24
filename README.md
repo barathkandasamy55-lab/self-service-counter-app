@@ -74,7 +74,7 @@ From the repo root, with Docker running:
 docker compose run --rm test
 ```
 
-It should finish with `Tests: 25 passed`. This runs Jest against a real PostgreSQL database (`counter_test` on the compose `db` service). The test setup creates that database if needed and applies the Prisma migrations to it. No mocks: each test boots the real Nest app on a random port and talks to it over HTTP.
+It should finish with `Tests: 26 passed`. This runs Jest against a real PostgreSQL database (`counter_test` on the compose `db` service). The test setup creates that database if needed and applies the Prisma migrations to it. No mocks: each test boots the real Nest app on a random port and talks to it over HTTP.
 
 To run on the host instead: `docker compose up -d db`, then `cd backend && npm install && npm test`. The default `TEST_DATABASE_URL` points at `localhost:55432/counter_test`. The tests refuse any database whose name doesn't end in `_test`, because they wipe it.
 
@@ -185,13 +185,29 @@ Prisma owns the schema and migrations (`backend/src/prisma/`) and runs every que
 
 ## What I'd do next with more time
 
-- **Staff tooling** for `needs_review` and duplicate-payment events: list, refund, fulfil manually.
-- **Authentication** for the locker endpoint (a per-locker key), and rate limiting on `POST /orders` so nobody can hold the whole stock by spamming orders.
-- **Webhook hardening:** a timestamp in the signed payload and a replay window. Today, a captured event replayed later is safe (idempotent) but is accepted indefinitely.
-- **Frontend tests:** the countdown hook (fake `performance.now`) and the payment screen states. The browser check above was a one-off script, not part of the suite.
-- **A real UPI QR code** on the payment screen.
-- **Upgrade to Prisma 7** with the `pg` driver adapter.
-- **Batch expiry:** the sweeper uses one transaction per lapsed order, which is fine for a kiosk but would need batching at scale.
+- **Authentication.** Today every endpoint is open, on the assumption that the kiosk and lockers sit on a trusted network. Next, every caller would prove who it is: staff sign in, and each kiosk and locker gets its own device credential.
+- **JWT.** Signed in callers would receive a short-lived access token (JWT) plus a refresh token. A Nest JWT guard would verify the token on each request, so the backend stays stateless and can scale to several instances.
+- **HttpOnly cookies and Next.js middleware.** The tokens would live in `HttpOnly`, `Secure`, `SameSite` cookies rather than `localStorage`, so page scripts can't read them and an XSS bug can't steal them. Because the browser sends the cookie on every request, server-side rendering also knows who the user is. Next.js middleware (`proxy.ts` in Next 16) would check the session before a protected page loads and redirect to `/login` if it's missing, so a protected page is never briefly shown to a logged-out user.
+- **Authorization with role-based access control (RBAC).** Each role may only call what it needs:
+  - `kiosk`: browse products, place orders, read its own orders
+  - `locker`: claim pickups
+  - `staff`: resolve `needs_review` orders, issue refunds, adjust stock
+  - `admin`: manage users and products
+
+  Implemented as a `@Roles()` decorator and a roles guard in Nest, so a locker token can't place orders and a kiosk token can't claim pickups. The frontend would get an auth provider and route guards for the staff screens, but the backend guards are what actually enforce access.
+- **WebSockets for live updates.** The screen currently polls: every 2 s for the order, every 5 s for products. With a WebSocket (or Server-Sent Events) connection, the backend would push "order paid" the moment the webhook arrives, and push stock changes as they happen, instead of every screen asking repeatedly. A slow poll would stay as a fallback if the connection drops. With several backend instances, Redis pub/sub would carry each event to whichever instance holds that screen's connection.
+- **Redis caching.** `GET /products` is the most-read endpoint and changes only when stock moves. I'd cache it in Redis and invalidate the cache on every reserve, release or pickup. Correctness wouldn't depend on the cache: placing an order always checks stock in Postgres, so a briefly stale count can only lead to a clean 409, never an oversell. Redis would also hold rate-limit counters for `POST /orders`, so nobody can lock up stock by spamming orders.
+- **Database indexing.** The queries in use today are already indexed:
+  - `orders (status, expires_at)` for finding lapsed holds
+  - `order_items (product_id)`
+  - `payment_events (order_id)`
+  - primary keys and the unique product name
+
+  With real traffic, I'd check the slow-query log and `EXPLAIN ANALYZE`, and add indexes for new access patterns. Examples: a partial index on just `status = 'pending'` orders, `orders (created_at)` for staff reports, and `payment_events (outcome)` for the refunds queue.
+- **Avoiding N+1 queries.** I'd replace the per-order expiry sweep and per-line stock updates with set-based queries, and watch Prisma's query log so new N+1 patterns are caught early.
+- **Prisma `$transaction` for new multi-step operations.** Orders, payments and pickups already run in interactive transactions. I'd use the same for staff actions such as refund-and-restock or resolving a `needs_review` order, so each one either fully happens or doesn't happen at all.
+- **Trigram search.** With a larger catalog, I'd add fast, typo-tolerant product search (and order lookup for staff) using Postgres `pg_trgm` with a GIN index, so "choclate" still finds "Chocolate Bar".
+
 
 ## Project layout
 

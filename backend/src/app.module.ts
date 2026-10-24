@@ -1,4 +1,5 @@
 import { INestApplication, Module, ValidationPipe } from '@nestjs/common';
+import { AppController } from './app.controller';
 import { ConfigModule } from './config/config.module';
 import { OrdersModule } from './modules/orders/orders.module';
 import { PaymentsModule } from './modules/payments/payments.module';
@@ -7,6 +8,7 @@ import { PrismaModule } from './prisma/prisma.module';
 
 @Module({
   imports: [ConfigModule, PrismaModule, ProductsModule, OrdersModule, PaymentsModule],
+  controllers: [AppController],
 })
 export class AppModule {}
 
