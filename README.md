@@ -39,6 +39,7 @@ If `http://localhost:3000` doesn't respond but the screen works, use `http://127
 | Follow the backend logs (Ctrl+C to stop following) | `docker compose logs -f backend` |
 | Stop everything | `docker compose down` |
 | Stop and wipe the database (fresh seed on next start) | `docker compose down -v` |
+| Browse the database in Prisma Studio, then open http://localhost:5555 (Ctrl+C to stop) | `docker compose exec backend npx prisma studio --port 5555 --browser none` |
 
 ### Try the whole flow
 

@@ -24,6 +24,7 @@ services:
       HOLD_SECONDS: 120
     ports:
       - "3000:3000"
+      - "5555:5555" # Prisma Studio, when started inside the container (see README)
     depends_on:
       db:
         condition: service_healthy
